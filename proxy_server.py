@@ -60,9 +60,41 @@ class ProjectionProcessor:
             return data
 
         if mode == "include":
-            # Only include specified fields
-            result = {}
+            # Group fields by parent path for arrays (e.g., "users.name", "users.email" -> "users": ["name", "email"])
+            array_projections = {}  # parent_key -> list of nested fields
+            regular_fields = []
+            
             for field in fields:
+                if "." in field:
+                    parts = field.split(".")
+                    parent_key = parts[0]
+                    nested_field = ".".join(parts[1:])
+                    
+                    # Check if parent is an array
+                    if parent_key in data and isinstance(data[parent_key], list):
+                        if parent_key not in array_projections:
+                            array_projections[parent_key] = []
+                        array_projections[parent_key].append(nested_field)
+                    else:
+                        regular_fields.append(field)
+                else:
+                    regular_fields.append(field)
+            
+            result = {}
+            
+            # Handle array projections (e.g., "users": ["name", "email"])
+            for parent_key, nested_fields in array_projections.items():
+                if parent_key in data:
+                    nested_projection = {
+                        "mode": "include",
+                        "fields": nested_fields
+                    }
+                    result[parent_key] = ProjectionProcessor.apply_projection(
+                        data[parent_key], nested_projection, parent_key
+                    )
+            
+            # Handle regular fields (direct keys or nested dict paths)
+            for field in regular_fields:
                 if field in data:
                     value = data[field]
                     # Recursively apply projection to nested objects
@@ -72,7 +104,7 @@ class ProjectionProcessor:
                         )
                     else:
                         result[field] = value
-                # Handle nested paths like "user.name"
+                # Handle nested paths like "user.name" (for dicts, not arrays)
                 elif "." in field:
                     parts = field.split(".")
                     current = data
@@ -104,39 +136,47 @@ class ProjectionProcessor:
             # Exclude specified fields
             result = {}
             for key, value in data.items():
-                # Check if this key should be excluded
+                # Check if this key should be excluded directly
                 if key in fields:
                     continue
-                # Check if any nested path matches
-                should_exclude = False
+                
+                # Check if this key is part of a nested exclusion path
+                # e.g., if excluding "user.password", we keep "user" but exclude "password" inside it
+                should_exclude_key = False
+                nested_exclusions = []
                 for field in fields:
-                    if field == key or field.startswith(f"{key}."):
-                        should_exclude = True
+                    if field == key:
+                        should_exclude_key = True
                         break
-                if should_exclude:
+                    elif field.startswith(f"{key}."):
+                        # This is a nested exclusion - keep the key but exclude nested field
+                        nested_exclusions.append(field[len(key) + 1:])  # Remove "key." prefix
+                
+                if should_exclude_key:
                     continue
                 
-                # Recursively apply exclusion to nested structures
-                if isinstance(value, (dict, list)):
-                    result[key] = ProjectionProcessor.apply_projection(
-                        value, projection, f"{path}.{key}" if path else key
-                    )
-                else:
-                    result[key] = value
-            
-            # Handle nested path exclusions
-            for field in fields:
-                if "." in field:
-                    parts = field.split(".")
-                    current = result
-                    for part in parts[:-1]:
-                        if isinstance(current, dict) and part in current:
-                            current = current[part]
-                        else:
-                            break
+                # If there are nested exclusions, apply them recursively
+                if nested_exclusions:
+                    nested_projection = {
+                        "mode": "exclude",
+                        "fields": nested_exclusions
+                    }
+                    if isinstance(value, (dict, list)):
+                        result[key] = ProjectionProcessor.apply_projection(
+                            value, nested_projection, f"{path}.{key}" if path else key
+                        )
                     else:
-                        if isinstance(current, dict) and parts[-1] in current:
-                            del current[parts[-1]]
+                        result[key] = value
+                else:
+                    # No exclusions for this key - include it
+                    # Recursively apply exclusion to nested structures
+                    if isinstance(value, (dict, list)):
+                        result[key] = ProjectionProcessor.apply_projection(
+                            value, projection, f"{path}.{key}" if path else key
+                        )
+                    else:
+                        result[key] = value
+            
             return result
 
         elif mode == "view":
