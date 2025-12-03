@@ -44,6 +44,7 @@ Request only specific fields from tool responses:
 
 Filter tool outputs using regex patterns:
 
+**Basic Grep:**
 ```json
 {
   "method": "tools/call",
@@ -64,10 +65,55 @@ Filter tool outputs using regex patterns:
 }
 ```
 
+**Grep with Context Lines:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "server::read_file",
+    "arguments": {
+      "path": "/logs/app.log",
+      "_meta": {
+        "grep": {
+          "pattern": "ERROR",
+          "contextLines": {
+            "both": 3
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Multiline Pattern Matching:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "server::read_file",
+    "arguments": {
+      "path": "/code/script.py",
+      "_meta": {
+        "grep": {
+          "pattern": "def.*\\n.*return",
+          "multiline": true
+        }
+      }
+    }
+  }
+}
+```
+
 **Grep Options:**
 - `pattern`: Regex pattern to search for
 - `caseInsensitive`: Case-insensitive matching (default: false)
+- `multiline`: Enable multiline pattern matching - allows patterns to span multiple lines (default: false)
 - `maxMatches`: Maximum number of matches to return
+- `contextLines`: Include context lines around matches (similar to grep -A, -B, -C)
+  - `before`: Number of lines before each match (grep -B)
+  - `after`: Number of lines after each match (grep -A)
+  - `both`: Number of lines both before and after (grep -C, overrides before/after)
 - `target`: Search in `content` (text) or `structuredContent` (JSON)
 
 ### 3. Combined Transformations

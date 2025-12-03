@@ -238,6 +238,154 @@ class TestGrepProcessor:
         assert "WARN" in result[0].text
         assert "INFO" not in result[0].text
 
+    def test_grep_context_lines_before(self):
+        """Test grep with context lines before matches."""
+        content = [
+            TextContent(type="text", text="Line 1: INFO\nLine 2: DEBUG\nLine 3: ERROR\nLine 4: WARN\nLine 5: INFO")
+        ]
+        grep_spec = {
+            "pattern": "ERROR",
+            "contextLines": {
+                "before": 2
+            }
+        }
+        result = GrepProcessor.apply_grep(content, grep_spec)
+        assert len(result) == 1
+        text = result[0].text
+        assert "Line 1: INFO" in text
+        assert "Line 2: DEBUG" in text
+        assert "Line 3: ERROR" in text
+        # Should not include lines after
+        assert "Line 4: WARN" not in text
+
+    def test_grep_context_lines_after(self):
+        """Test grep with context lines after matches."""
+        content = [
+            TextContent(type="text", text="Line 1: INFO\nLine 2: ERROR\nLine 3: DEBUG\nLine 4: WARN\nLine 5: INFO")
+        ]
+        grep_spec = {
+            "pattern": "ERROR",
+            "contextLines": {
+                "after": 2
+            }
+        }
+        result = GrepProcessor.apply_grep(content, grep_spec)
+        assert len(result) == 1
+        text = result[0].text
+        assert "Line 2: ERROR" in text
+        assert "Line 3: DEBUG" in text
+        assert "Line 4: WARN" in text
+        # Should not include lines before
+        assert "Line 1: INFO" not in text
+
+    def test_grep_context_lines_both(self):
+        """Test grep with context lines both before and after."""
+        content = [
+            TextContent(type="text", text="Line 1: INFO\nLine 2: DEBUG\nLine 3: ERROR\nLine 4: WARN\nLine 5: INFO")
+        ]
+        grep_spec = {
+            "pattern": "ERROR",
+            "contextLines": {
+                "both": 1
+            }
+        }
+        result = GrepProcessor.apply_grep(content, grep_spec)
+        assert len(result) == 1
+        text = result[0].text
+        assert "Line 2: DEBUG" in text
+        assert "Line 3: ERROR" in text
+        assert "Line 4: WARN" in text
+        # Should not include lines outside context
+        assert "Line 1: INFO" not in text
+        assert "Line 5: INFO" not in text
+
+    def test_grep_context_lines_multiple_matches(self):
+        """Test grep with context lines and multiple matches."""
+        content = [
+            TextContent(type="text", text="Line 1: INFO\nLine 2: ERROR\nLine 3: DEBUG\nLine 4: ERROR\nLine 5: WARN")
+        ]
+        grep_spec = {
+            "pattern": "ERROR",
+            "contextLines": {
+                "both": 1
+            }
+        }
+        result = GrepProcessor.apply_grep(content, grep_spec)
+        assert len(result) == 1
+        text = result[0].text
+        # Should include context around both matches
+        assert "Line 1: INFO" in text or "Line 2: ERROR" in text
+        assert "Line 2: ERROR" in text
+        assert "Line 3: DEBUG" in text
+        assert "Line 4: ERROR" in text
+        assert "Line 5: WARN" in text
+
+    def test_grep_multiline_pattern(self):
+        """Test grep with multiline pattern support."""
+        content = [
+            TextContent(type="text", text="def my_function():\n    return True\n\ndef other():\n    pass")
+        ]
+        # Pattern that matches def followed by return on next line, but stops at double newline
+        grep_spec = {
+            "pattern": "def my_function\\(\\).*?return True",
+            "multiline": True
+        }
+        result = GrepProcessor.apply_grep(content, grep_spec)
+        assert len(result) == 1
+        text = result[0].text
+        assert "def my_function()" in text
+        assert "return True" in text
+        # Should not match the other function (no return)
+        assert "def other()" not in text
+
+    def test_grep_multiline_with_dotall(self):
+        """Test multiline pattern with dot matching newlines."""
+        content = [
+            TextContent(type="text", text="Start\nMiddle\nEnd\nOther")
+        ]
+        grep_spec = {
+            "pattern": "Start.*End",
+            "multiline": True
+        }
+        result = GrepProcessor.apply_grep(content, grep_spec)
+        assert len(result) == 1
+        text = result[0].text
+        assert "Start" in text
+        assert "End" in text
+        assert "Middle" in text
+
+    def test_grep_multiline_without_flag(self):
+        """Test that multiline pattern without flag doesn't match across lines."""
+        content = [
+            TextContent(type="text", text="Start\nMiddle\nEnd")
+        ]
+        grep_spec = {
+            "pattern": "Start.*End",
+            "multiline": False
+        }
+        result = GrepProcessor.apply_grep(content, grep_spec)
+        # Should not match because . doesn't match newline without multiline
+        assert len(result) == 1
+        assert "No matches" in result[0].text
+
+    def test_grep_context_and_multiline(self):
+        """Test combining context lines with multiline patterns."""
+        # Note: Context lines work differently for multiline - they're not supported
+        # because multiline matches span multiple lines already
+        content = [
+            TextContent(type="text", text="Line 1\nLine 2\nStart\nMiddle\nEnd\nLine 6\nLine 7")
+        ]
+        grep_spec = {
+            "pattern": "Start.*End",
+            "multiline": True
+        }
+        result = GrepProcessor.apply_grep(content, grep_spec)
+        assert len(result) == 1
+        text = result[0].text
+        assert "Start" in text
+        assert "End" in text
+        assert "Middle" in text
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -117,9 +117,35 @@ class MCPProxyServer:
                             "default": False,
                             "description": "Whether to perform case-insensitive matching"
                         },
+                        "multiline": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Enable multiline pattern matching. When true, '.' matches newlines and patterns can span multiple lines (similar to grep -P or re.DOTALL)"
+                        },
                         "maxMatches": {
                             "type": "number",
                             "description": "Maximum number of matches to return"
+                        },
+                        "contextLines": {
+                            "type": "object",
+                            "description": "Include context lines around matches (similar to grep -A, -B, -C options)",
+                            "properties": {
+                                "before": {
+                                    "type": "number",
+                                    "default": 0,
+                                    "description": "Number of lines to include before each match (grep -B)"
+                                },
+                                "after": {
+                                    "type": "number",
+                                    "default": 0,
+                                    "description": "Number of lines to include after each match (grep -A)"
+                                },
+                                "both": {
+                                    "type": "number",
+                                    "default": 0,
+                                    "description": "Number of lines to include both before and after each match (grep -C). If specified, overrides 'before' and 'after'"
+                                }
+                            }
                         },
                         "target": {
                             "type": "string",

@@ -4,7 +4,7 @@ Processors for field projection and grep operations.
 
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from mcp.types import Content, ImageContent, TextContent
 
@@ -235,6 +235,18 @@ class GrepProcessor:
         case_insensitive = grep_spec.get("caseInsensitive", False)
         max_matches = grep_spec.get("maxMatches")
         target = grep_spec.get("target", "content")  # 'content' or 'structuredContent'
+        multiline = grep_spec.get("multiline", False)
+        
+        # Context lines configuration
+        context_lines = grep_spec.get("contextLines", {})
+        context_before = context_lines.get("before", 0) if isinstance(context_lines, dict) else 0
+        context_after = context_lines.get("after", 0) if isinstance(context_lines, dict) else 0
+        context_both = context_lines.get("both", 0) if isinstance(context_lines, dict) else 0
+        
+        # If 'both' is specified, it overrides 'before' and 'after'
+        if context_both > 0:
+            context_before = context_both
+            context_after = context_both
 
         if not pattern:
             return content
@@ -242,6 +254,8 @@ class GrepProcessor:
         # Validate and compile regex pattern
         try:
             flags = re.IGNORECASE if case_insensitive else 0
+            if multiline:
+                flags |= re.MULTILINE | re.DOTALL
             regex = re.compile(pattern, flags)
         except re.error as e:
             # Invalid regex pattern - return error message as content
@@ -283,20 +297,20 @@ class GrepProcessor:
                                 match_count += 1
                     except json.JSONDecodeError:
                         # Not JSON, fall back to text search
-                        matches = GrepProcessor._search_in_text(
-                            text, regex, max_matches, match_count
+                        matches, match_lines = GrepProcessor._search_in_text(
+                            text, regex, max_matches, match_count, context_before, context_after, multiline
                         )
                         if matches:
                             filtered.append(TextContent(type="text", text=matches))
-                            match_count += len(matches.split("\n"))
+                            match_count += match_lines
                 else:
                     # Plain text search
-                    matches = GrepProcessor._search_in_text(
-                        text, regex, max_matches, match_count
+                    matches, match_lines = GrepProcessor._search_in_text(
+                        text, regex, max_matches, match_count, context_before, context_after, multiline
                     )
                     if matches:
                         filtered.append(TextContent(type="text", text=matches))
-                        match_count += len(matches.split("\n"))
+                        match_count += match_lines
 
             elif isinstance(item, ImageContent):
                 # Can't grep images - optionally skip or include
@@ -309,16 +323,104 @@ class GrepProcessor:
         return filtered if filtered else [TextContent(type="text", text="No matches found.")]
 
     @staticmethod
-    def _search_in_text(text: str, regex: re.Pattern, max_matches: Optional[int], current_count: int) -> str:
-        """Search for pattern in text, returning matching lines."""
+    def _search_in_text(
+        text: str, 
+        regex: re.Pattern, 
+        max_matches: Optional[int], 
+        current_count: int,
+        context_before: int = 0,
+        context_after: int = 0,
+        multiline: bool = False
+    ) -> Tuple[str, int]:
+        """
+        Search for pattern in text, returning matching lines with optional context.
+        
+        Args:
+            text: Text to search in
+            regex: Compiled regex pattern
+            max_matches: Maximum number of matches to return
+            current_count: Current match count
+            context_before: Number of lines to include before each match
+            context_after: Number of lines to include after each match
+            multiline: Whether pattern can span multiple lines
+            
+        Returns:
+            Tuple of (result_string, number_of_actual_matches)
+        """
+        # For multiline patterns, search the entire text as one block
+        if multiline:
+            matches = list(regex.finditer(text))
+            if not matches:
+                return "", 0
+            
+            # Limit matches if needed
+            if max_matches:
+                remaining_matches = max_matches - current_count
+                if remaining_matches <= 0:
+                    return "", 0
+                matches = matches[:remaining_matches]
+            
+            # For multiline, return the matched text portions
+            result_parts = []
+            for match in matches:
+                match_text = match.group(0)
+                result_parts.append(match_text)
+            
+            return "\n---\n".join(result_parts), len(matches)
+        
+        # For single-line patterns, use line-by-line search
         lines = text.split("\n")
-        matches = []
-        for line in lines:
+        matched_line_indices = set()
+        
+        # First pass: find all matching line indices
+        for i, line in enumerate(lines):
             if regex.search(line):
-                matches.append(line)
-                if max_matches and len(matches) + current_count >= max_matches:
-                    break
-        return "\n".join(matches)
+                matched_line_indices.add(i)
+        
+        if not matched_line_indices:
+            return "", 0
+        
+        # Limit matches if needed
+        if max_matches:
+            remaining_matches = max_matches - current_count
+            if remaining_matches <= 0:
+                return "", 0
+            # Take only the first N matches
+            matched_line_indices = set(sorted(matched_line_indices)[:remaining_matches])
+        
+        # Second pass: collect matches with context, avoiding duplicates
+        included_indices = set()
+        result_lines = []
+        actual_match_count = 0
+        
+        for match_idx in sorted(matched_line_indices):
+            # Add context before
+            for i in range(max(0, match_idx - context_before), match_idx):
+                if i not in included_indices:
+                    result_lines.append(lines[i])
+                    included_indices.add(i)
+            
+            # Add the matching line
+            if match_idx not in included_indices:
+                result_lines.append(lines[match_idx])
+                included_indices.add(match_idx)
+                actual_match_count += 1
+            
+            # Add context after
+            for i in range(match_idx + 1, min(len(lines), match_idx + 1 + context_after)):
+                if i not in included_indices:
+                    result_lines.append(lines[i])
+                    included_indices.add(i)
+            
+            # Add separator between match groups if context is used and matches are far apart
+            if context_before > 0 or context_after > 0:
+                # Check if next match is far enough to add separator
+                next_match = min([m for m in matched_line_indices if m > match_idx], default=None)
+                if next_match and next_match > match_idx + context_after + 1:
+                    # Add separator line
+                    result_lines.append("---")
+        
+        return "\n".join(result_lines), actual_match_count
 
     @staticmethod
     def _search_in_structure(

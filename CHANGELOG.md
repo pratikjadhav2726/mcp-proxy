@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial open source release
 - Field projection capabilities (include/exclude/view modes)
 - Grep search functionality for filtering tool outputs
+- **Context lines support for grep** - Include lines before/after matches (similar to grep -A, -B, -C)
+- **Multiline pattern support for grep** - Enable patterns that span multiple lines
 - Support for multiple underlying MCP servers
 - Token savings tracking and reporting
 - Configuration via YAML file
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restructured repository for open source standards
 - Moved source code to `src/mcp_proxy/` package structure
 - Organized tests into `tests/` directory
+- Enhanced grep processor with context lines and multiline matching
 
 ## [0.1.0] - 2024-XX-XX
 
