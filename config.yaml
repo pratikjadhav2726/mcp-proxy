@@ -1,0 +1,25 @@
+# MCP Proxy Server Configuration
+# 
+# This file configures the underlying MCP servers that the proxy will connect to.
+# Each server entry should have:
+#   - name: Unique identifier for the server
+#   - command: Command to run the server (e.g., "npx", "python", "node")
+#   - args: List of arguments to pass to the command
+
+underlying_servers:
+  # Everything server - comprehensive MCP reference implementation
+  # See: https://github.com/modelcontextprotocol/servers/tree/main/src/everything
+  - name: everything
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-everything", "stdio"]
+  
+  # Example: Filesystem server
+  # - name: filesystem
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"]
+  
+  # Example: Python-based server
+  # - name: my_server
+  #   command: python
+  #   args: ["-m", "my_mcp_server"]
+

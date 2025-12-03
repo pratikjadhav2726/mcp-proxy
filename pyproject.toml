@@ -1,0 +1,15 @@
+[project]
+name = "mcp-proxy-server"
+version = "0.1.0"
+description = "MCP Proxy Server with field projection and grep capabilities"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.23.1",
+    "pyyaml>=6.0.3",
+    "uvicorn[standard]>=0.38.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+]

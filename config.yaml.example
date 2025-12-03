@@ -1,0 +1,36 @@
+# MCP Proxy Server Configuration Example
+# 
+# This file configures the underlying MCP servers that the proxy will connect to.
+# Copy this file to config.yaml and customize for your setup.
+#
+# Each server entry should have:
+#   - name: Unique identifier for the server (used in tool names as "name::tool_name")
+#   - command: Command to run the server (e.g., "npx", "python", "node", "uv")
+#   - args: List of arguments to pass to the command
+
+underlying_servers:
+  # Example: Official MCP Filesystem Server
+  # - name: filesystem
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
+  
+  # Example: Official MCP Git Server
+  # - name: git
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-git", "/path/to/git/repo"]
+  
+  # Example: Python-based MCP Server
+  # - name: my_python_server
+  #   command: python
+  #   args: ["-m", "my_mcp_server"]
+  
+  # Example: Node.js MCP Server
+  # - name: my_node_server
+  #   command: node
+  #   args: ["/path/to/server.js"]
+  
+  # Example: Using uv to run a Python MCP server
+  # - name: my_uv_server
+  #   command: uv
+  #   args: ["run", "python", "-m", "my_mcp_server"]
+
