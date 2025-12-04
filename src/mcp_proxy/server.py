@@ -4,6 +4,7 @@ MCP Proxy Server implementation.
 
 import asyncio
 import json
+import logging
 import sys
 from typing import Any, Dict, List, Optional, Union
 
@@ -14,7 +15,10 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import Content, TextContent, Tool, ServerCapabilities
 
+from mcp_proxy.logging_config import get_logger
 from mcp_proxy.processors import GrepProcessor, ProjectionProcessor
+
+logger = get_logger(__name__)
 
 
 class MCPProxyServer:
@@ -173,96 +177,88 @@ class MCPProxyServer:
             """Aggregate tools from all underlying servers."""
             all_tools = []
 
-            print(f"[DEBUG] list_tools called", file=sys.stderr)
-            print(f"[DEBUG] underlying_servers keys: {list(self.underlying_servers.keys())}", file=sys.stderr)
-            print(f"[DEBUG] tools_cache keys: {list(self.tools_cache.keys())}", file=sys.stderr)
+            logger.debug("list_tools called")
+            logger.debug(f"underlying_servers keys: {list(self.underlying_servers.keys())}")
+            logger.debug(f"tools_cache keys: {list(self.tools_cache.keys())}")
 
-            # First, try to use cached tools
+            # First, process cached tools
             for server_name, cached_tools in self.tools_cache.items():
-                print(f"[DEBUG] Using {len(cached_tools)} cached tools from {server_name}", file=sys.stderr)
+                logger.debug(f"Using {len(cached_tools)} cached tools from {server_name}")
                 for tool in cached_tools:
                     # Enhance schema with _meta parameter
                     enhanced_schema = self._enhance_tool_schema(tool.inputSchema)
-
-                    # Debug: Verify _meta is in the schema
-                    if isinstance(enhanced_schema, dict) and "properties" in enhanced_schema:
-                        has_meta = "_meta" in enhanced_schema.get("properties", {})
-                        print(f"[DEBUG] Tool {server_name}_{tool.name}: _meta in schema = {has_meta}", file=sys.stderr)
-                        if has_meta:
-                            print(f"[DEBUG]   _meta properties: {list(enhanced_schema['properties']['_meta'].get('properties', {}).keys())}", file=sys.stderr)
 
                     prefixed_tool = Tool(
                         name=f"{server_name}_{tool.name}",
                         description=tool.description or "",
                         inputSchema=enhanced_schema,
                     )
-
-                    # Debug: Verify _meta is in the created Tool object
-                    tool_schema = prefixed_tool.inputSchema
-                    if hasattr(tool_schema, 'model_dump'):
-                        tool_schema_dict = tool_schema.model_dump()
-                    elif isinstance(tool_schema, dict):
-                        tool_schema_dict = tool_schema
-                    else:
-                        tool_schema_dict = {}
-
-                    if isinstance(tool_schema_dict, dict) and "properties" in tool_schema_dict:
-                        has_meta_after = "_meta" in tool_schema_dict.get("properties", {})
-                        print(f"[DEBUG] Tool {server_name}_{tool.name} after Tool() creation: _meta in schema = {has_meta_after}", file=sys.stderr)
-
                     all_tools.append(prefixed_tool)
 
-            # Also try to get tools from active sessions (in case cache is stale or empty)
-            for server_name, session in self.underlying_servers.items():
-                if server_name not in self.tools_cache or len(self.tools_cache.get(server_name, [])) == 0:
+            # Parallelize tool listing from servers with cache misses or empty cache
+            servers_to_fetch = [
+                (server_name, session)
+                for server_name, session in self.underlying_servers.items()
+                if server_name not in self.tools_cache or len(self.tools_cache.get(server_name, [])) == 0
+            ]
+
+            if servers_to_fetch:
+                logger.debug(f"Fetching tools from {len(servers_to_fetch)} server(s) in parallel")
+
+                async def fetch_tools_from_server(server_name: str, session: ClientSession) -> tuple[str, List[Tool]]:
+                    """Fetch tools from a single server."""
                     try:
-                        print(f"[DEBUG] Fetching tools from {server_name} session (cache miss or empty)", file=sys.stderr)
+                        logger.debug(f"Fetching tools from {server_name} session (cache miss or empty)")
                         tools_result = await asyncio.wait_for(session.list_tools(), timeout=10.0)
-                        print(f"[DEBUG] Got {len(tools_result.tools)} tools from {server_name} session", file=sys.stderr)
-                        # Prefix tool names with server name to avoid conflicts
-                        # Use underscore separator instead of :: to avoid validation warnings
-                        for tool in tools_result.tools:
-                            # Enhance schema with _meta parameter
+                        logger.debug(f"Got {len(tools_result.tools)} tools from {server_name} session")
+                        return server_name, tools_result.tools
+                    except asyncio.TimeoutError:
+                        logger.error(f"Timeout fetching tools from {server_name} (10s)")
+                        return server_name, []
+                    except Exception as e:
+                        logger.error(f"Error listing tools from {server_name}: {e}", exc_info=True)
+                        return server_name, []
+
+                # Fetch tools from all servers in parallel
+                fetch_tasks = [
+                    fetch_tools_from_server(server_name, session)
+                    for server_name, session in servers_to_fetch
+                ]
+                results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+                # Process results and add tools
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"Exception during parallel tool fetch: {result}", exc_info=True)
+                        continue
+
+                    server_name, tools = result
+                    if tools:
+                        self.tools_cache[server_name] = tools
+                        logger.info(f"Loaded {len(tools)} tools from {server_name}")
+                        if tools:
+                            tool_names = [t.name for t in tools[:5]]
+                            logger.debug(f"Sample tools from {server_name}: {tool_names}{'...' if len(tools) > 5 else ''}")
+
+                        # Add tools with enhanced schemas
+                        for tool in tools:
                             enhanced_schema = self._enhance_tool_schema(tool.inputSchema)
-
-                            # Debug: Verify _meta is in the schema
-                            if isinstance(enhanced_schema, dict) and "properties" in enhanced_schema:
-                                has_meta = "_meta" in enhanced_schema.get("properties", {})
-                                print(f"[DEBUG] Tool {server_name}_{tool.name}: _meta in schema = {has_meta}", file=sys.stderr)
-
                             prefixed_tool = Tool(
                                 name=f"{server_name}_{tool.name}",
                                 description=tool.description or "",
                                 inputSchema=enhanced_schema,
                             )
-
-                            # Debug: Verify _meta is in the created Tool object
-                            tool_schema = prefixed_tool.inputSchema
-                            if hasattr(tool_schema, 'model_dump'):
-                                tool_schema_dict = tool_schema.model_dump()
-                            elif isinstance(tool_schema, dict):
-                                tool_schema_dict = tool_schema
-                            else:
-                                tool_schema_dict = {}
-
-                            if isinstance(tool_schema_dict, dict) and "properties" in tool_schema_dict:
-                                has_meta_after = "_meta" in tool_schema_dict.get("properties", {})
-                                print(f"[DEBUG] Tool {server_name}_{tool.name} after Tool() creation: _meta in schema = {has_meta_after}", file=sys.stderr)
-
                             all_tools.append(prefixed_tool)
-                        self.tools_cache[server_name] = tools_result.tools
-                    except Exception as e:
-                        print(f"[ERROR] Error listing tools from {server_name}: {e}", file=sys.stderr)
-                        import traceback
-                        traceback.print_exc(file=sys.stderr)
+                    else:
+                        logger.warning(f"{server_name} returned 0 tools")
 
-            print(f"[DEBUG] Returning {len(all_tools)} total tools", file=sys.stderr)
+            logger.debug(f"Returning {len(all_tools)} total tools")
             return all_tools
 
         @self.server.call_tool()
         async def call_tool(name: str, arguments: dict) -> List[Content]:
             """Intercept tool calls, forward to underlying servers, and apply transformations."""
-            print(f"[DEBUG] call_tool called: {name}", file=sys.stderr)
+            logger.debug(f"call_tool called: {name}")
 
             # Validate arguments
             if not isinstance(arguments, dict):
@@ -271,7 +267,7 @@ class MCPProxyServer:
             # Extract meta from arguments (following the _meta convention from the discussion)
             meta = arguments.pop("_meta", None) if isinstance(arguments, dict) else None
             if meta:
-                print(f"[DEBUG] Meta found: {meta}", file=sys.stderr)
+                logger.debug(f"Meta found: {meta}")
                 # Validate meta structure
                 if not isinstance(meta, dict):
                     raise ValueError("_meta must be a dictionary")
@@ -285,15 +281,15 @@ class MCPProxyServer:
             if len(parts) != 2:
                 raise ValueError(f"Tool name must be in format 'server_tool', got: {name}")
             server_name, tool_name = parts
-            print(f"[DEBUG] Parsed: server={server_name}, tool={tool_name}", file=sys.stderr)
+            logger.debug(f"Parsed: server={server_name}, tool={tool_name}")
 
             if server_name not in self.underlying_servers:
                 available = list(self.underlying_servers.keys())
-                print(f"[ERROR] Unknown server: {server_name}. Available: {available}", file=sys.stderr)
+                logger.error(f"Unknown server: {server_name}. Available: {available}")
                 raise ValueError(f"Unknown server: {server_name}. Available servers: {', '.join(available) if available else 'none'}")
 
             session = self.underlying_servers[server_name]
-            print(f"[DEBUG] Got session for {server_name}, calling tool {tool_name}", file=sys.stderr)
+            logger.debug(f"Got session for {server_name}, calling tool {tool_name}")
 
             # Extract original tool from cache
             original_tool = None
@@ -308,18 +304,16 @@ class MCPProxyServer:
 
             # Call underlying tool (arguments now have _meta removed) with timeout
             try:
-                print(f"[DEBUG] Calling tool {tool_name} on {server_name} with timeout 60s", file=sys.stderr)
+                logger.debug(f"Calling tool {tool_name} on {server_name} with timeout 60s")
                 result = await asyncio.wait_for(session.call_tool(tool_name, arguments), timeout=60.0)
-                print(f"[DEBUG] Tool call completed successfully", file=sys.stderr)
+                logger.debug("Tool call completed successfully")
             except asyncio.TimeoutError:
                 error_msg = f"Timeout calling tool {tool_name} on {server_name} (60s)"
-                print(f"[ERROR] {error_msg}", file=sys.stderr)
+                logger.error(error_msg)
                 return [TextContent(type="text", text=f"Error: {error_msg}")]
             except Exception as e:
                 error_msg = f"Error calling tool {tool_name} on {server_name}: {str(e)}"
-                print(f"[ERROR] {error_msg}", file=sys.stderr)
-                import traceback
-                traceback.print_exc(file=sys.stderr)
+                logger.error(error_msg, exc_info=True)
                 return [TextContent(type="text", text=f"Error: {error_msg}")]
 
             # Extract content from result
@@ -350,9 +344,10 @@ class MCPProxyServer:
                             "applied": True,
                             "mode": mode,
                         }
+                        logger.debug(f"Applied projection with mode: {mode}")
                     except Exception as e:
                         error_msg = f"Error applying projection: {str(e)}"
-                        print(f"[ERROR] {error_msg}", file=sys.stderr)
+                        logger.error(error_msg, exc_info=True)
                         return [TextContent(type="text", text=f"Error: {error_msg}")]
 
                 # Apply grep
@@ -369,9 +364,10 @@ class MCPProxyServer:
                             "applied": True,
                             "pattern": grep_spec.get("pattern"),
                         }
+                        logger.debug(f"Applied grep with pattern: {grep_spec.get('pattern')}")
                     except Exception as e:
                         error_msg = f"Error applying grep: {str(e)}"
-                        print(f"[ERROR] {error_msg}", file=sys.stderr)
+                        logger.error(error_msg, exc_info=True)
                         return [TextContent(type="text", text=f"Error: {error_msg}")]
 
             # Calculate token savings
@@ -388,7 +384,7 @@ class MCPProxyServer:
 
     async def _connect_to_server_sync(self, server_name: str, server_params: StdioServerParameters):
         """Connect to a server synchronously and keep connection alive using background task."""
-        print(f"[DEBUG] _connect_to_server_sync called for {server_name}", file=sys.stderr)
+        logger.debug(f"_connect_to_server_sync called for {server_name}")
 
         # Use a background task to keep the connection alive
         # This allows the context manager to stay open
@@ -398,16 +394,16 @@ class MCPProxyServer:
         async def _keep_connection():
             """Background task to maintain connection."""
             try:
-                print(f"[DEBUG] Background task: Creating stdio_client for {server_name}...", file=sys.stderr)
-                print(f"[DEBUG] Background task: server_params command={server_params.command}, args={server_params.args}", file=sys.stderr)
+                logger.debug(f"Background task: Creating stdio_client for {server_name}...")
+                logger.debug(f"Background task: server_params command={server_params.command}, args={server_params.args}")
 
                 # Use stdio_client context manager - this properly isolates subprocess streams
                 async with stdio_client(server_params) as (read_stream, write_stream):
-                    print(f"[DEBUG] Background task: Got streams for {server_name}", file=sys.stderr)
+                    logger.debug(f"Background task: Got streams for {server_name}")
 
                     # Use ClientSession as context manager (like direct test) but keep it alive
                     # by not exiting the context
-                    print(f"[DEBUG] Background task: Creating ClientSession for {server_name}...", file=sys.stderr)
+                    logger.debug(f"Background task: Creating ClientSession for {server_name}...")
                     session_obj = ClientSession(read_stream, write_stream)
                     session = await session_obj.__aenter__()
                     # Store the session object for cleanup
@@ -415,22 +411,20 @@ class MCPProxyServer:
 
                     try:
                         # Initialize with timeout
-                        print(f"[DEBUG] Background task: Initializing session for {server_name}...", file=sys.stderr)
+                        logger.debug(f"Background task: Initializing session for {server_name}...")
                         try:
                             init_result = await asyncio.wait_for(session.initialize(), timeout=30.0)
-                            print(f"[OK] Connected to underlying server: {server_name}", file=sys.stderr)
+                            logger.info(f"Connected to underlying server: {server_name}")
                             if init_result.serverInfo:
-                                print(f"     Server: {init_result.serverInfo.name}, Version: {init_result.serverInfo.version}", file=sys.stderr)
+                                logger.info(f"     Server: {init_result.serverInfo.name}, Version: {init_result.serverInfo.version}")
                         except asyncio.TimeoutError:
-                            print(f"[ERROR] Timeout initializing session for {server_name} (30s)", file=sys.stderr)
+                            logger.error(f"Timeout initializing session for {server_name} (30s)")
                             connection_error[0] = Exception(f"Timeout connecting to {server_name}")
                             connection_event.set()
                             await session_obj.__aexit__(None, None, None)
                             return
                         except Exception as e:
-                            print(f"[ERROR] Exception during initialization: {e}", file=sys.stderr)
-                            import traceback
-                            traceback.print_exc(file=sys.stderr)
+                            logger.error(f"Exception during initialization: {e}", exc_info=True)
                             connection_error[0] = e
                             connection_event.set()
                             await session_obj.__aexit__(None, None, None)
@@ -438,34 +432,32 @@ class MCPProxyServer:
 
                         # Store session immediately
                         self.underlying_servers[server_name] = session
-                        print(f"[DEBUG] Background task: Session stored for {server_name}", file=sys.stderr)
+                        logger.debug(f"Background task: Session stored for {server_name}")
 
                         # Pre-load tools
                         try:
-                            print(f"[DEBUG] Background task: Listing tools for {server_name}...", file=sys.stderr)
+                            logger.debug(f"Background task: Listing tools for {server_name}...")
                             tools_result = await asyncio.wait_for(session.list_tools(), timeout=10.0)
-                            print(f"[DEBUG] Background task: Got {len(tools_result.tools)} tools from {server_name}", file=sys.stderr)
-                            print(f"     Loaded {len(tools_result.tools)} tools from {server_name}", file=sys.stderr)
+                            logger.debug(f"Background task: Got {len(tools_result.tools)} tools from {server_name}")
+                            logger.info(f"     Loaded {len(tools_result.tools)} tools from {server_name}")
                             self.tools_cache[server_name] = tools_result.tools
                             if tools_result.tools:
                                 tool_names = [t.name for t in tools_result.tools[:5]]
-                                print(f"     Sample tools: {tool_names}{'...' if len(tools_result.tools) > 5 else ''}", file=sys.stderr)
+                                logger.info(f"     Sample tools: {tool_names}{'...' if len(tools_result.tools) > 5 else ''}")
                             else:
-                                print(f"[WARNING] {server_name} returned 0 tools", file=sys.stderr)
+                                logger.warning(f"{server_name} returned 0 tools")
                         except Exception as e:
-                            print(f"[ERROR] Could not list tools from {server_name}: {e}", file=sys.stderr)
-                            import traceback
-                            traceback.print_exc(file=sys.stderr)
+                            logger.error(f"Could not list tools from {server_name}: {e}", exc_info=True)
 
                         # Signal that connection is ready
                         connection_event.set()
-                        print(f"[DEBUG] Background task: Connection ready for {server_name}", file=sys.stderr)
+                        logger.debug(f"Background task: Connection ready for {server_name}")
 
                         # Keep connection alive by waiting (both contexts stay open)
                         try:
                             await asyncio.Event().wait()  # Wait forever
                         except asyncio.CancelledError:
-                            print(f"[INFO] Connection to {server_name} cancelled", file=sys.stderr)
+                            logger.info(f"Connection to {server_name} cancelled")
                             if server_name in self.underlying_servers:
                                 del self.underlying_servers[server_name]
                             if server_name in self._server_contexts:
@@ -485,9 +477,7 @@ class MCPProxyServer:
                             del self._server_contexts[server_name]
 
             except Exception as e:
-                print(f"[ERROR] Connection task failed for {server_name}: {e}", file=sys.stderr)
-                import traceback
-                traceback.print_exc(file=sys.stderr)
+                logger.error(f"Connection task failed for {server_name}: {e}", exc_info=True)
                 connection_error[0] = e
                 connection_event.set()
                 if server_name in self.underlying_servers:
@@ -498,11 +488,11 @@ class MCPProxyServer:
         self._connection_tasks[server_name] = task
 
         # Wait for connection to be established (with timeout)
-        print(f"[DEBUG] Waiting for connection to {server_name} to be established...", file=sys.stderr)
+        logger.debug(f"Waiting for connection to {server_name} to be established...")
         try:
             await asyncio.wait_for(connection_event.wait(), timeout=35.0)
         except asyncio.TimeoutError:
-            print(f"[ERROR] Timeout waiting for connection to {server_name}", file=sys.stderr)
+            logger.error(f"Timeout waiting for connection to {server_name}")
             task.cancel()
             raise Exception(f"Timeout waiting for connection to {server_name}")
 
@@ -510,15 +500,15 @@ class MCPProxyServer:
         if connection_error[0]:
             raise connection_error[0]
 
-        print(f"[DEBUG] Connection setup complete for {server_name}", file=sys.stderr)
+        logger.debug(f"Connection setup complete for {server_name}")
 
     async def initialize_underlying_servers(self):
         """Initialize connections to underlying MCP servers."""
         if not self.server_configs:
-            print("No underlying servers configured.")
+            logger.info("No underlying servers configured.")
             return
 
-        print(f"Initializing {len(self.server_configs)} underlying server(s)...")
+        logger.info(f"Initializing {len(self.server_configs)} underlying server(s)...")
 
         for config in self.server_configs:
             server_name = config["name"]
@@ -526,7 +516,7 @@ class MCPProxyServer:
             args = config.get("args", [])
 
             try:
-                print(f"Connecting to {server_name}... (command: {command}, args: {args})")
+                logger.info(f"Connecting to {server_name}... (command: {command}, args: {args})")
                 server_params = StdioServerParameters(
                     command=command,
                     args=args,
@@ -534,25 +524,23 @@ class MCPProxyServer:
                 )
 
                 # Connect synchronously - wait for it to complete
-                print(f"[DEBUG] Calling _connect_to_server_sync for {server_name}...", file=sys.stderr)
+                logger.debug(f"Calling _connect_to_server_sync for {server_name}...")
                 await self._connect_to_server_sync(server_name, server_params)
-                print(f"[DEBUG] Connection to {server_name} established", file=sys.stderr)
+                logger.debug(f"Connection to {server_name} established")
 
             except Exception as e:
-                print(f"[ERROR] Failed to start connection to {server_name}: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Failed to start connection to {server_name}: {e}", exc_info=True)
 
     async def cleanup(self):
         """Clean up connections to underlying servers."""
         try:
-            print("\n[INFO] Cleaning up connections...", file=sys.stderr)
+            logger.info("Cleaning up connections...")
             # Close all context managers
             for server_name, session_obj in list(self._server_contexts.items()):
                 try:
                     await session_obj.__aexit__(None, None, None)
                 except Exception as e:
-                    print(f"[WARNING] Error closing {server_name}: {e}", file=sys.stderr)
+                    logger.warning(f"Error closing {server_name}: {e}")
             self._server_contexts.clear()
             # Cancel connection tasks
             for server_name, task in list(self._connection_tasks.items()):

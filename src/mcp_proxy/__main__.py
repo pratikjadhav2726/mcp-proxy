@@ -3,12 +3,19 @@ Main entry point for the MCP Proxy Server.
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
+
+from mcp_proxy.logging_config import setup_logging
 
 
 def main():
     """Main entry point."""
+    # Set up logging from environment variable or default to INFO
+    log_level = os.getenv("MCP_PROXY_LOG_LEVEL", "INFO")
+    setup_logging(level=log_level)
+    
     asyncio.run(async_main())
 
 

@@ -7,6 +7,10 @@ from typing import Any, Dict, List
 
 import yaml
 
+from mcp_proxy.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def load_config(config_path: str = "config.yaml") -> List[Dict[str, Any]]:
     """
@@ -25,9 +29,9 @@ def load_config(config_path: str = "config.yaml") -> List[Dict[str, Any]]:
                 return []
             return config.get("underlying_servers", []) or []
     except FileNotFoundError:
-        print(f"Config file {config_path} not found. Using empty configuration.")
+        logger.warning(f"Config file {config_path} not found. Using empty configuration.")
         return []
     except Exception as e:
-        print(f"Error loading config: {e}. Using empty configuration.")
+        logger.error(f"Error loading config: {e}. Using empty configuration.", exc_info=True)
         return []
 
