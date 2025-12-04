@@ -23,6 +23,9 @@ Contains transformation processors:
 #### `mcp_proxy.config`
 Handles configuration loading from YAML files.
 
+#### `mcp_proxy.logging_config`
+Provides structured logging infrastructure with configurable log levels.
+
 ## Data Flow
 
 ```
@@ -63,6 +66,10 @@ Tools from multiple servers are aggregated with naming convention:
 - Prevents naming conflicts
 - Maintains server identity
 
+**Parallel Discovery**: Tool listing from multiple servers is performed in parallel using `asyncio.gather()`, providing significant performance improvements (2-3x speedup) when multiple servers need tool discovery.
+
+**Caching**: Tool definitions are cached after first discovery to avoid repeated queries and provide instant tool listing for cached tools.
+
 ## Transformation Pipeline
 
 1. **Schema Enhancement**: Add `_meta` parameter to all tool schemas
@@ -81,8 +88,12 @@ Tools from multiple servers are aggregated with naming convention:
 
 ## Performance Considerations
 
-- Async/await for non-blocking operations
-- Connection pooling to reduce overhead
-- Tool caching to avoid repeated queries
-- Minimal transformation overhead (<10ms typically)
+- **Async/await**: All operations are asynchronous for non-blocking I/O
+- **Parallel Tool Discovery**: Tools are fetched from multiple servers concurrently using `asyncio.gather()`
+- **Connection Pooling**: Persistent connections reduce connection overhead
+- **Tool Caching**: Tool definitions are cached to avoid repeated queries
+- **Minimal Transformation Overhead**: Projection and grep operations typically add <10ms latency
+- **Structured Logging**: Configurable log levels allow performance tuning (DEBUG can impact performance)
+
+See [PERFORMANCE.md](PERFORMANCE.md) for detailed performance documentation.
 

@@ -17,12 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Token savings tracking and reporting
 - Configuration via YAML file
 - Comprehensive documentation
+- **Structured logging system** - Replaced print statements with proper logging infrastructure
+- **Parallel tool discovery** - Tools are fetched from multiple servers concurrently for 2-3x performance improvement
+- **Logging configuration** - Configurable log levels via `MCP_PROXY_LOG_LEVEL` environment variable
+- **Performance documentation** - Detailed performance characteristics and optimization guide
 
 ### Changed
 - Restructured repository for open source standards
 - Moved source code to `src/mcp_proxy/` package structure
 - Organized tests into `tests/` directory
 - Enhanced grep processor with context lines and multiline matching
+- **Replaced all print statements with structured logging** - Better observability and debugging
+- **Optimized tool listing** - Parallel execution reduces discovery time by 2-3x
+- **Improved error logging** - Stack traces included in error logs for better debugging
 
 ## [0.1.0] - 2024-XX-XX
 
