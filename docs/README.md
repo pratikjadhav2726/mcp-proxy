@@ -40,6 +40,9 @@ Performance characteristics, optimizations, and benchmarking.
 - Performance testing
 - Monitoring and troubleshooting
 
+### [Configuration Documentation](CONFIGURATION.md)
+Complete guide to configuration files, validation, and best practices.
+
 ### [Quick Reference Guide](QUICK_REFERENCE.md)
 Quick reference for common operations and configurations.
 
@@ -55,9 +58,10 @@ Quick reference for common operations and configurations.
 
 1. **New to the project?** Start with the [main README](../README.md)
 2. **Want to understand the system?** Read [Architecture Documentation](ARCHITECTURE.md)
-3. **Need to configure logging?** See [Logging Documentation](LOGGING.md)
-4. **Optimizing performance?** Check [Performance Documentation](PERFORMANCE.md)
-5. **Quick lookup?** Use [Quick Reference Guide](QUICK_REFERENCE.md)
+3. **Configuring servers?** See [Configuration Documentation](CONFIGURATION.md)
+4. **Need to configure logging?** See [Logging Documentation](LOGGING.md)
+5. **Optimizing performance?** Check [Performance Documentation](PERFORMANCE.md)
+6. **Quick lookup?** Use [Quick Reference Guide](QUICK_REFERENCE.md)
 
 ## Documentation Standards
 

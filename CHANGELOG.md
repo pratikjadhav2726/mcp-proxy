@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parallel tool discovery** - Tools are fetched from multiple servers concurrently for 2-3x performance improvement
 - **Logging configuration** - Configurable log levels via `MCP_PROXY_LOG_LEVEL` environment variable
 - **Performance documentation** - Detailed performance characteristics and optimization guide
+- **Pydantic configuration validation** - Robust configuration validation with helpful error messages
+- **Configuration documentation** - Complete guide to configuration files and validation rules
 
 ### Changed
 - Restructured repository for open source standards

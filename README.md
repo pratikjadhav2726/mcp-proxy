@@ -201,9 +201,30 @@ underlying_servers:
 ```
 
 **Configuration Fields:**
-- `name`: Unique identifier for the server (used in tool names as `name::tool_name`)
+- `name`: Unique identifier for the server (used in tool names as `name_tool_name`)
+  - Required: Yes
+  - Type: String
+  - Constraints: Must be unique, alphanumeric with underscores/hyphens only, 1-100 characters
 - `command`: Command to run the server (e.g., `npx`, `python`, `node`)
+  - Required: Yes
+  - Type: String
+  - Constraints: Cannot be empty
 - `args`: List of arguments to pass to the command
+  - Required: No (defaults to empty list)
+  - Type: List of strings
+- `env`: Optional environment variables dictionary
+  - Required: No
+  - Type: Dictionary of string key-value pairs
+
+**Configuration Validation:**
+The proxy server uses Pydantic for configuration validation, ensuring:
+- All required fields are present
+- Field types are correct
+- Server names are unique
+- Names and commands are properly formatted
+- Helpful error messages for invalid configurations
+
+If validation fails, the server will log detailed error messages and raise a `ValueError` with specific field-level error information.
 
 ## Usage
 
