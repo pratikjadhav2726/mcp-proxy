@@ -4,7 +4,7 @@ An MCP (Model Context Protocol) proxy server that acts as an intermediary betwee
 
 ## Overview
 
-This proxy server builds on the ideas discussed in [GitHub issue #1709](https://github.com/modelcontextprotocol/servers/issues/1709) of the `modelcontextprotocol` repository. It enables:
+This proxy server builds on the ideas discussed in [GitHub Discussion #1709]([https://github.com/modelcontextprotocol/servers/issues/1709](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/1709)) of the `modelcontextprotocol` repository. It enables:
 
 - **Field Projection**: Request only specific fields from tool responses, reducing token usage by 85-95% in many cases
 - **Grep Search**: Filter tool outputs using regex patterns, extracting only relevant information
