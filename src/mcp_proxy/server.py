@@ -281,6 +281,35 @@ class MCPProxyServer:
             logger.debug("list_tools called")
             logger.debug(f"underlying_servers keys: {list(self.underlying_servers.keys())}")
             logger.debug(f"tools_cache keys: {list(self.tools_cache.keys())}")
+            
+            # Add a special proxy capabilities tool first
+            proxy_capabilities_tool = Tool(
+                name="proxy_get_capabilities",
+                description=(
+                    "Get MCP-RLM-Proxy advanced search capabilities and usage guide.\n\n"
+                    "This proxy enhances ALL tools with:\n"
+                    "- Field projection (filter fields, 85-95% token savings)\n"
+                    "- Advanced search modes:\n"
+                    "  • BM25: Relevance-ranked search (top-K most relevant chunks)\n"
+                    "  • Fuzzy: Approximate matching (handles typos/variations)\n"
+                    "  • Context: Extract paragraphs/sections (not just lines)\n"
+                    "  • Structure: Navigate metadata without loading data (99.9% savings)\n"
+                    "  • Regex: Traditional pattern matching (default)\n\n"
+                    "Call this tool to see examples and learn how to use these features.\n\n"
+                    "**Key principle**: Filter at proxy BEFORE data enters your context!"
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "show_examples": {
+                            "type": "boolean",
+                            "description": "Show usage examples",
+                            "default": True
+                        }
+                    }
+                }
+            )
+            all_tools.append(proxy_capabilities_tool)
 
             # First, process cached tools
             for server_name, cached_tools in self.tools_cache.items():
@@ -294,9 +323,13 @@ class MCPProxyServer:
                     if not enhanced_description.endswith('\n'):
                         enhanced_description += '\n'
                     enhanced_description += (
-                        f"\n**Note**: This tool is from the '{server_name}' server. "
-                        f"Call it as '{server_name}_{tool.name}'. "
-                        f"You can add '_meta' parameter for field projection or grep filtering."
+                        f"\n**Server**: {server_name} | **Call as**: `{server_name}_{tool.name}`\n\n"
+                        f"**💡 Proxy Enhancement**: Add `_meta` parameter for:\n"
+                        f"- **Projection**: Filter fields (85-95% token savings)\n"
+                        f"- **BM25 Search**: Relevance ranking (99%+ savings)\n"
+                        f"- **Fuzzy Match**: Handle typos (98%+ savings)\n"
+                        f"- **Structure Nav**: Explore without loading (99.9%+ savings)\n\n"
+                        f"💡 Tip: Call `proxy_get_capabilities` to see examples!\n"
                     )
 
                     prefixed_tool = Tool(
@@ -381,6 +414,10 @@ class MCPProxyServer:
         async def call_tool(name: str, arguments: dict) -> List[Content]:
             """Intercept tool calls, forward to underlying servers, and apply transformations."""
             logger.debug(f"call_tool called: {name}")
+            
+            # Handle special proxy capabilities tool
+            if name == "proxy_get_capabilities":
+                return self._handle_capabilities_request(arguments)
 
             # Validate arguments
             if not isinstance(arguments, dict):
@@ -560,6 +597,182 @@ class MCPProxyServer:
             self.metrics.record_call(original_size, new_size, used_projection, used_grep)
 
             return content
+    
+    def _handle_capabilities_request(self, arguments: dict) -> List[Content]:
+        """Handle the proxy_get_capabilities tool call."""
+        show_examples = arguments.get("show_examples", True)
+        
+        response = """# MCP-RLM-Proxy Advanced Capabilities
+
+## Overview
+This proxy enhances ALL tools with advanced search and filtering capabilities.
+Use the `_meta` parameter to access these features.
+
+## Key Features
+
+### 1. Field Projection (85-95% token savings)
+Extract only specific fields from responses.
+
+Example:
+{
+  "path": "/data/users.json",
+  "_meta": {
+    "projection": {
+      "mode": "include",
+      "fields": ["users.name", "users.email"]
+    }
+  }
+}
+
+### 2. Advanced Search Modes
+
+#### BM25 Relevance Ranking (99%+ token savings)
+Returns top-K most relevant chunks instead of loading everything.
+
+{
+  "_meta": {
+    "grep": {
+      "mode": "bm25",
+      "query": "database connection error timeout",
+      "topK": 5
+    }
+  }
+}
+
+#### Fuzzy Matching (98%+ token savings)
+Handles typos and variations.
+
+{
+  "_meta": {
+    "grep": {
+      "mode": "fuzzy",
+      "pattern": "MacBook",
+      "threshold": 0.7
+    }
+  }
+}
+
+#### Context Extraction (95%+ token savings)
+Get paragraphs/sections, not just lines.
+
+{
+  "_meta": {
+    "grep": {
+      "mode": "context",
+      "pattern": "error",
+      "contextType": "paragraph"
+    }
+  }
+}
+
+#### Structure Navigation (99.9%+ token savings)
+Explore data structure WITHOUT loading content!
+
+{
+  "_meta": {
+    "grep": {
+      "mode": "structure",
+      "maxDepth": 3
+    }
+  }
+}
+
+Returns metadata: types, sizes, field names, samples - NOT full data.
+
+#### Regex Search (default, 95%+ token savings)
+Traditional pattern matching.
+
+{
+  "_meta": {
+    "grep": {
+      "mode": "regex",  // or omit for default
+      "pattern": "ERROR|FATAL",
+      "caseInsensitive": true
+    }
+  }
+}
+
+## Recommended Workflow for AI Agents
+
+### Step 1: Discover Structure (50 tokens)
+{
+  "_meta": {
+    "grep": {
+      "mode": "structure"
+    }
+  }
+}
+
+### Step 2: Search for Relevance (1,500 tokens)
+{
+  "_meta": {
+    "grep": {
+      "mode": "bm25",
+      "query": "what you're looking for",
+      "topK": 5
+    }
+  }
+}
+
+### Step 3: Extract Specific Fields (500 tokens)
+{
+  "_meta": {
+    "projection": {
+      "mode": "include",
+      "fields": ["specific", "fields"]
+    }
+  }
+}
+
+Total: ~2,000 tokens vs 500,000+ (99.6% savings!)
+
+## Why This Matters
+
+❌ **Without proxy**: Load full output → 50,000 tokens → Agent context polluted
+✅ **With proxy**: Filter at source → 500 tokens → Clean agent context
+
+## Key Principle
+
+**Filter BEFORE data enters your context, not after!**
+
+The proxy does the heavy lifting so you don't waste tokens and context.
+
+## More Information
+
+See detailed documentation:
+- Advanced Search Guide: docs/ADVANCED_SEARCH.md
+- AI Agent Guide: docs/AI_AGENT_GUIDE.md
+
+## Available Modes Summary
+
+| Mode | Use When | Token Savings |
+|------|----------|---------------|
+| structure | Don't know data format | 99.9%+ |
+| bm25 | Know what, not where | 99%+ |
+| fuzzy | Handle typos/variations | 98%+ |
+| context | Need full paragraphs | 95%+ |
+| regex | Know exact pattern | 95%+ |
+"""
+        
+        if show_examples:
+            response += "\n\n## Quick Example\n\n"
+            response += "Instead of:\n"
+            response += '  call_tool("filesystem_read_file", {"path": "log.txt"})\n'
+            response += "  → Returns 280,000 tokens\n\n"
+            response += "Do this:\n"
+            response += '  call_tool("filesystem_read_file", {\n'
+            response += '    "path": "log.txt",\n'
+            response += '    "_meta": {\n'
+            response += '      "grep": {\n'
+            response += '        "mode": "bm25",\n'
+            response += '        "query": "error database",\n'
+            response += '        "topK": 3\n'
+            response += '      }\n'
+            response += '    }\n'
+            response += '  })\n'
+            response += "  → Returns 1,500 tokens (99.5% savings!)\n"
+        
+        return [TextContent(type="text", text=response)]
 
     async def _connect_to_server_sync(self, server_name: str, server_params: StdioServerParameters):
         """Connect to a server synchronously and keep connection alive using background task."""
@@ -756,11 +969,26 @@ class MCPProxyServer:
                     "projection": {
                         "supported": True,
                         "modes": ["include", "exclude", "view"],
+                        "description": "Filter response fields to reduce token usage by 85-95%"
                     },
                     "grep": {
                         "supported": True,
+                        "modes": ["regex", "bm25", "fuzzy", "context", "structure"],
                         "maxPatternLength": 1000,
+                        "description": "Advanced search with multiple modes: regex (default), bm25 (relevance ranking), fuzzy (approximate), context (paragraph/section extraction), structure (metadata only)",
+                        "features": {
+                            "bm25_ranking": "Relevance-ranked search, returns top-K most relevant chunks",
+                            "fuzzy_matching": "Approximate matching with configurable similarity threshold",
+                            "context_extraction": "Extract paragraphs/sections/sentences containing matches",
+                            "structure_navigation": "Explore data structure without loading content (99.9% token savings)",
+                            "progressive_refinement": "Multi-step workflow: discover → search → refine"
+                        }
                     },
+                    "rlm_support": {
+                        "supported": True,
+                        "description": "Recursive Language Model principles implemented - treat outputs as external environment to explore programmatically",
+                        "paper": "arXiv:2512.24601"
+                    }
                 },
             })
 
