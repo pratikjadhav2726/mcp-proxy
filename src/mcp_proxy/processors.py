@@ -8,6 +8,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from mcp.types import Content, ImageContent, TextContent
 
+from mcp_proxy.advanced_search import (
+    BM25Processor,
+    FuzzyMatcher,
+    ContextExtractor,
+    StructureNavigator
+)
+
 
 class ProjectionProcessor:
     """Handles field projection operations on tool responses."""
@@ -215,22 +222,184 @@ class ProjectionProcessor:
 
 
 class GrepProcessor:
-    """Handles grep-like search operations on tool outputs."""
+    """Handles advanced search operations on tool outputs."""
+    
+    def __init__(self):
+        self.bm25 = BM25Processor()
+        self.fuzzy = FuzzyMatcher()
+        self.context_extractor = ContextExtractor()
+        self.navigator = StructureNavigator()
 
     @staticmethod
     def apply_grep(
         content: List[Content], grep_spec: Dict[str, Any]
     ) -> List[Content]:
         """
-        Apply grep search to content.
-
+        Apply search to content with multiple modes.
+        
+        Supported modes:
+        - regex: Traditional regex search (default)
+        - bm25: Relevance-ranked search
+        - fuzzy: Fuzzy/approximate matching
+        - context: Extract with intelligent context
+        - structure: Navigate structure without loading all data
+        
         Args:
             content: List of Content objects
-            grep_spec: Grep specification with 'pattern', 'caseInsensitive', etc.
-
+            grep_spec: Search specification
+            
         Returns:
             Filtered Content objects
         """
+        search_mode = grep_spec.get("mode", "regex")  # Default to regex for backwards compat
+        
+        processor = GrepProcessor()
+        
+        if search_mode == "bm25":
+            return processor._apply_bm25_search(content, grep_spec)
+        elif search_mode == "fuzzy":
+            return processor._apply_fuzzy_search(content, grep_spec)
+        elif search_mode == "context":
+            return processor._apply_context_search(content, grep_spec)
+        elif search_mode == "structure":
+            return processor._apply_structure_navigation(content, grep_spec)
+        else:  # regex (default)
+            return processor._apply_regex_search(content, grep_spec)
+    
+    def _apply_bm25_search(
+        self, content: List[Content], grep_spec: Dict[str, Any]
+    ) -> List[Content]:
+        """Apply BM25 ranking search."""
+        query = grep_spec.get("query") or grep_spec.get("pattern", "")
+        top_k = grep_spec.get("topK", 5)
+        chunk_size = grep_spec.get("chunkSize", 500)
+        
+        if not query:
+            return [TextContent(type="text", text="Error: BM25 search requires 'query' parameter")]
+        
+        results = []
+        for item in content:
+            if isinstance(item, TextContent):
+                text = item.text
+                
+                # Try to parse as JSON for structured search
+                try:
+                    data = json.loads(text)
+                    text = json.dumps(data, indent=2)  # Pretty print for better chunking
+                except json.JSONDecodeError:
+                    pass  # Use as plain text
+                
+                # Rank chunks by relevance
+                ranked_chunks = self.bm25.rank_chunks(text, query, chunk_size, top_k)
+                
+                if ranked_chunks:
+                    result_text = f"BM25 Search Results (query: '{query}', top {len(ranked_chunks)} of {top_k}):\n\n"
+                    
+                    for i, chunk_data in enumerate(ranked_chunks, 1):
+                        result_text += f"=== Result {i} (Score: {chunk_data['score']:.4f}) ===\n"
+                        result_text += f"{chunk_data['chunk']}\n\n"
+                    
+                    results.append(TextContent(type="text", text=result_text))
+        
+        return results if results else [TextContent(type="text", text="No relevant results found.")]
+    
+    def _apply_fuzzy_search(
+        self, content: List[Content], grep_spec: Dict[str, Any]
+    ) -> List[Content]:
+        """Apply fuzzy matching search."""
+        pattern = grep_spec.get("pattern", "")
+        threshold = grep_spec.get("threshold", 0.7)
+        max_matches = grep_spec.get("maxMatches", 10)
+        
+        if not pattern:
+            return [TextContent(type="text", text="Error: Fuzzy search requires 'pattern' parameter")]
+        
+        results = []
+        for item in content:
+            if isinstance(item, TextContent):
+                matches = self.fuzzy.fuzzy_search(item.text, pattern, threshold, max_matches)
+                
+                if matches:
+                    result_text = f"Fuzzy Search Results (pattern: '{pattern}', threshold: {threshold}):\n\n"
+                    
+                    for i, match in enumerate(matches, 1):
+                        result_text += f"=== Match {i} (Similarity: {match['similarity']:.2%}) ===\n"
+                        result_text += f"Found: \"{match['match']}\"\n"
+                        result_text += f"Context: ...{match['context']}...\n\n"
+                    
+                    results.append(TextContent(type="text", text=result_text))
+        
+        return results if results else [TextContent(type="text", text="No fuzzy matches found.")]
+    
+    def _apply_context_search(
+        self, content: List[Content], grep_spec: Dict[str, Any]
+    ) -> List[Content]:
+        """Apply context-aware search."""
+        pattern = grep_spec.get("pattern", "")
+        context_type = grep_spec.get("contextType", "paragraph")  # paragraph, section, sentence
+        max_matches = grep_spec.get("maxMatches", 5)
+        
+        if not pattern:
+            return [TextContent(type="text", text="Error: Context search requires 'pattern' parameter")]
+        
+        results = []
+        for item in content:
+            if isinstance(item, TextContent):
+                matches = self.context_extractor.extract_with_context(
+                    item.text, pattern, context_type, max_matches
+                )
+                
+                if matches:
+                    result_text = f"Context Search Results (pattern: '{pattern}', context: {context_type}):\n\n"
+                    
+                    for i, match in enumerate(matches, 1):
+                        result_text += f"=== {context_type.capitalize()} {i} ({match['matches']} match(es)) ===\n"
+                        result_text += f"{match['context']}\n\n"
+                    
+                    results.append(TextContent(type="text", text=result_text))
+        
+        return results if results else [TextContent(type="text", text="No contextual matches found.")]
+    
+    def _apply_structure_navigation(
+        self, content: List[Content], grep_spec: Dict[str, Any]
+    ) -> List[Content]:
+        """Return structure metadata without full data."""
+        max_depth = grep_spec.get("maxDepth", 3)
+        
+        results = []
+        for item in content:
+            if isinstance(item, TextContent):
+                try:
+                    data = json.loads(item.text)
+                    
+                    # Get structure summary
+                    summary = self.navigator.get_structure_summary(data, max_depth)
+                    
+                    result_text = "Structure Navigation Summary:\n\n"
+                    result_text += f"Type: {summary['type']}\n"
+                    result_text += f"Size: {json.dumps(summary['size'], indent=2)}\n\n"
+                    result_text += f"Structure:\n{json.dumps(summary['keys'], indent=2)}\n\n"
+                    result_text += f"Sample Data:\n{json.dumps(summary['sample'], indent=2)}\n\n"
+                    result_text += f"Statistics:\n{json.dumps(summary['statistics'], indent=2)}\n"
+                    
+                    results.append(TextContent(type="text", text=result_text))
+                except json.JSONDecodeError:
+                    # For plain text, provide text statistics
+                    text = item.text
+                    result_text = "Text Structure Summary:\n\n"
+                    result_text += f"Length: {len(text)} characters\n"
+                    result_text += f"Lines: {len(text.split(chr(10)))}\n"
+                    result_text += f"Words: {len(text.split())}\n"
+                    result_text += f"First 200 chars: {text[:200]}...\n"
+                    
+                    results.append(TextContent(type="text", text=result_text))
+        
+        return results if results else [TextContent(type="text", text="No content to navigate.")]
+    
+    def _apply_regex_search(
+        self, content: List[Content], grep_spec: Dict[str, Any]
+    ) -> List[Content]:
+        """Apply traditional regex search (original grep behavior)."""
         pattern = grep_spec.get("pattern", "")
         case_insensitive = grep_spec.get("caseInsensitive", False)
         max_matches = grep_spec.get("maxMatches")

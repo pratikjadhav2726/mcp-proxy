@@ -171,21 +171,64 @@ class MCPProxyServer:
                 },
                 "grep": {
                     "type": "object",
-                    "description": "Grep-like search to filter tool outputs using regex patterns. Extracts only matching content.",
+                    "description": "Advanced search to filter tool outputs. Supports multiple modes for different search strategies.",
                     "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": ["regex", "bm25", "fuzzy", "context", "structure"],
+                            "default": "regex",
+                            "description": (
+                                "Search mode:\n"
+                                "- 'regex': Traditional regex search (default)\n"
+                                "- 'bm25': Relevance-ranked search (returns top-K most relevant chunks)\n"
+                                "- 'fuzzy': Approximate/fuzzy matching (handles typos)\n"
+                                "- 'context': Extract with intelligent context (paragraphs/sections)\n"
+                                "- 'structure': Navigate data structure without loading full content"
+                            )
+                        },
                         "pattern": {
                             "type": "string",
-                            "description": "Regex pattern to search for in the tool output"
+                            "description": "Search pattern (regex for 'regex' mode, query text for others)"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query (used for 'bm25' mode, alternative to 'pattern')"
+                        },
+                        "topK": {
+                            "type": "number",
+                            "default": 5,
+                            "description": "Number of top results to return (for 'bm25' mode)"
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "default": 0.7,
+                            "description": "Similarity threshold 0-1 (for 'fuzzy' mode)"
+                        },
+                        "contextType": {
+                            "type": "string",
+                            "enum": ["paragraph", "section", "sentence", "lines"],
+                            "default": "paragraph",
+                            "description": "Context extraction type (for 'context' mode)"
+                        },
+                        "chunkSize": {
+                            "type": "number",
+                            "default": 500,
+                            "description": "Size of chunks for analysis (for 'bm25' mode)"
+                        },
+                        "maxDepth": {
+                            "type": "number",
+                            "default": 3,
+                            "description": "Maximum depth for structure navigation (for 'structure' mode)"
                         },
                         "caseInsensitive": {
                             "type": "boolean",
                             "default": False,
-                            "description": "Whether to perform case-insensitive matching"
+                            "description": "Case-insensitive matching (for 'regex' mode)"
                         },
                         "multiline": {
                             "type": "boolean",
                             "default": False,
-                            "description": "Enable multiline pattern matching. When true, '.' matches newlines and patterns can span multiple lines (similar to grep -P or re.DOTALL)"
+                            "description": "Enable multiline patterns (for 'regex' mode)"
                         },
                         "maxMatches": {
                             "type": "number",
@@ -193,22 +236,19 @@ class MCPProxyServer:
                         },
                         "contextLines": {
                             "type": "object",
-                            "description": "Include context lines around matches (similar to grep -A, -B, -C options)",
+                            "description": "Include context lines around matches (for 'regex' mode)",
                             "properties": {
                                 "before": {
                                     "type": "number",
-                                    "default": 0,
-                                    "description": "Number of lines to include before each match (grep -B)"
+                                    "default": 0
                                 },
                                 "after": {
                                     "type": "number",
-                                    "default": 0,
-                                    "description": "Number of lines to include after each match (grep -A)"
+                                    "default": 0
                                 },
                                 "both": {
                                     "type": "number",
-                                    "default": 0,
-                                    "description": "Number of lines to include both before and after each match (grep -C). If specified, overrides 'before' and 'after'"
+                                    "default": 0
                                 }
                             }
                         },
@@ -216,10 +256,10 @@ class MCPProxyServer:
                             "type": "string",
                             "enum": ["content", "structuredContent"],
                             "default": "content",
-                            "description": "Where to search: 'content' for plain text, 'structuredContent' for JSON data"
+                            "description": "Where to search: 'content' for plain text, 'structuredContent' for JSON"
                         }
                     },
-                    "required": ["pattern"]
+                    "required": []
                 }
             },
             "additionalProperties": False
@@ -248,10 +288,20 @@ class MCPProxyServer:
                 for tool in cached_tools:
                     # Enhance schema with _meta parameter
                     enhanced_schema = self._enhance_tool_schema(tool.inputSchema)
+                    
+                    # Create enhanced description
+                    enhanced_description = tool.description or ""
+                    if not enhanced_description.endswith('\n'):
+                        enhanced_description += '\n'
+                    enhanced_description += (
+                        f"\n**Note**: This tool is from the '{server_name}' server. "
+                        f"Call it as '{server_name}_{tool.name}'. "
+                        f"You can add '_meta' parameter for field projection or grep filtering."
+                    )
 
                     prefixed_tool = Tool(
                         name=f"{server_name}_{tool.name}",
-                        description=tool.description or "",
+                        description=enhanced_description,
                         inputSchema=enhanced_schema,
                     )
                     all_tools.append(prefixed_tool)
@@ -304,9 +354,20 @@ class MCPProxyServer:
                         # Add tools with enhanced schemas
                         for tool in tools:
                             enhanced_schema = self._enhance_tool_schema(tool.inputSchema)
+                            
+                            # Create enhanced description
+                            enhanced_description = tool.description or ""
+                            if not enhanced_description.endswith('\n'):
+                                enhanced_description += '\n'
+                            enhanced_description += (
+                                f"\n**Note**: This tool is from the '{server_name}' server. "
+                                f"Call it as '{server_name}_{tool.name}'. "
+                                f"You can add '_meta' parameter for field projection or grep filtering."
+                            )
+                            
                             prefixed_tool = Tool(
                                 name=f"{server_name}_{tool.name}",
-                                description=tool.description or "",
+                                description=enhanced_description,
                                 inputSchema=enhanced_schema,
                             )
                             all_tools.append(prefixed_tool)
@@ -337,17 +398,68 @@ class MCPProxyServer:
             if "_" not in name:
                 raise ValueError(f"Tool name must be in format 'server_tool', got: {name}")
 
-            # Split on last underscore to handle tool names that might contain underscores
-            parts = name.rsplit("_", 1)
-            if len(parts) != 2:
-                raise ValueError(f"Tool name must be in format 'server_tool', got: {name}")
-            server_name, tool_name = parts
+            # Try to match known server names from the start
+            # This handles tool names with underscores (e.g., playwright_browser_run)
+            server_name = None
+            tool_name = None
+            
+            for known_server in self.underlying_servers.keys():
+                if name.startswith(known_server + "_"):
+                    server_name = known_server
+                    tool_name = name[len(known_server) + 1:]  # +1 to skip the underscore
+                    break
+            
+            # Fallback to old method if no known server matched
+            if server_name is None:
+                parts = name.rsplit("_", 1)
+                if len(parts) != 2:
+                    raise ValueError(f"Tool name must be in format 'server_tool', got: {name}")
+                server_name, tool_name = parts
+            
             logger.debug(f"Parsed: server={server_name}, tool={tool_name}")
 
             if server_name not in self.underlying_servers:
                 available = list(self.underlying_servers.keys())
                 logger.error(f"Unknown server: {server_name}. Available: {available}")
-                raise ValueError(f"Unknown server: {server_name}. Available servers: {', '.join(available) if available else 'none'}")
+                
+                # Provide helpful error message
+                available_str = ', '.join(available) if available else 'none'
+                error_msg = (
+                    f"Unknown server: '{server_name}'. Available servers: {available_str}.\n"
+                    f"\n"
+                    f"Tool name format: {{server_name}}_{{tool_name}}\n"
+                    f"Note: Tool names can contain underscores (e.g., 'server_tool_name')\n"
+                    f"\n"
+                    f"Attempted to call: {name}\n"
+                    f"Parsed as: server='{server_name}', tool='{tool_name}'\n"
+                    f"\n"
+                    f"If this parsing is wrong, the issue is likely:\n"
+                    f"1. Server '{server_name}' doesn't exist in configuration\n"
+                    f"2. Tool name should start with one of: {available_str}\n"
+                    f"\n"
+                    f"Common mistakes:\n"
+                    f"- Calling 'browser_run' instead of 'playwright_browser_run'\n"
+                    f"- Calling 'read_file' instead of 'filesystem_read_file'\n"
+                    f"\n"
+                    f"Suggestions based on your call '{name}':\n"
+                )
+                
+                # Suggest corrections for each available server
+                for avail_server in available:
+                    # If the tool name contains the available server name, suggest it
+                    if avail_server in name:
+                        suggested_tool = name
+                        if not name.startswith(avail_server + "_"):
+                            suggested_tool = f"{avail_server}_{name}"
+                        error_msg += f"  - {suggested_tool}\n"
+                
+                error_msg += (
+                    f"\n"
+                    f"💡 Best practice: Call list_tools() first to see all available tool names.\n"
+                    f"   Available servers: {available_str}"
+                )
+                
+                raise ValueError(error_msg)
 
             session = self.underlying_servers[server_name]
             logger.debug(f"Got session for {server_name}, calling tool {tool_name}")
